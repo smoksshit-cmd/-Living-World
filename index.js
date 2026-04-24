@@ -1,6 +1,7 @@
 /**
  * Living World — SillyTavern Extension
  * Всё в одном файле, без ES import/export
+ * v2 — исправлены: триггер, метка в чате, лорбук, разделение знаний, COT
  */
 
 (function () {
@@ -15,11 +16,9 @@
     const DEFAULT_SETTINGS = {
         enabled: true,
 
-        // Имена
-        nameStyle: 'auto',     // 'auto' | 'russian' | 'foreign' | 'mixed'
-        nameGender: 'mixed',   // 'male' | 'female' | 'mixed'
+        nameStyle: 'auto',
+        nameGender: 'mixed',
 
-        // Энкаунтеры
         encounterEnabled: true,
         encounterEveryN: 5,
         encounterChance: 25,
@@ -29,18 +28,20 @@
         autoDetectLocation: true,
         manualLocation: '',
         saveNpcToLorebook: true,
+        targetLorebook: '',       // имя лорбука для записи НПС
 
-        // Автономия
         autonomyEnabled: true,
         autonomyEveryN: 8,
         knowledgeSeparation: true,
         timelineEnabled: true,
 
-        // Кастомный эндпоинт
         useCustomEndpoint: false,
         customEndpointUrl: '',
         customApiKey: '',
         customModel: '',
+
+        // Внутренний флаг — ждём ли следующего триггера для ручного энкаунтера
+        _pendingManualEncounter: false,
     };
 
     // ============================================================
@@ -134,6 +135,7 @@
             hook:      'Персонаж с зацепкой — несёт информацию, просьбу, слух или конфликт.',
             important: 'Потенциально важный персонаж — у него своя история, мотивация и тайна.',
         }[type];
+
         return 'Ты нарратор живого мира. Опиши появление персонажа в сцене.\n\n'
             + 'Имя НПС: ' + npcName + '\n'
             + 'Локация: ' + (location || 'текущая сцена') + '\n'
@@ -141,7 +143,8 @@
             + 'Контекст:\n' + context + '\n\n'
             + 'Напиши 2-4 предложения от третьего лица. НПС приходит по СВОИМ делам. '
             + 'Не упоминай главного героя по имени напрямую. Создай интригу или атмосферу. '
-            + 'Отвечай только текстом появления.';
+            + 'ВАЖНО: Отвечай ТОЛЬКО текстом появления, без каких-либо размышлений, пояснений или метакомментариев. '
+            + 'Не пиши <think> блоки. Только художественный текст.';
     }
 
     function buildAutonomyPrompt(charName, location, context) {
@@ -151,13 +154,20 @@
             + 'Придумай 2-3 коротких события из жизни ' + charName + ' за это время. '
             + 'Он НЕ знает что делал главный герой. '
             + 'События про его собственную жизнь: дела, встречи, мысли. '
-            + 'Отвечай кратко, от третьего лица.';
+            + 'Отвечай кратко, от третьего лица. '
+            + 'Никаких <think> блоков — только результат.';
     }
 
+    // Усиленный инжект разделения знаний — запрет мета-знания и COT в ответах
     function buildKnowledgeInject(charName) {
-        return '[ПРАВИЛО МИРА: ' + charName + ' не знает о событиях, при которых не присутствовал лично. '
-            + 'Информацию об отсутствующих сценах он получает только если ему сообщили напрямую. '
-            + 'Он живёт своей жизнью независимо от главного героя.]';
+        return '[СИСТЕМНОЕ ПРАВИЛО — ОБЯЗАТЕЛЬНО:\n'
+            + charName + ' живёт независимой жизнью и НЕ обладает метазнанием.\n'
+            + '• ' + charName + ' знает ТОЛЬКО то, при чём присутствовал лично или что ему сообщили напрямую.\n'
+            + '• ' + charName + ' НЕ знает о событиях, произошедших в его отсутствие.\n'
+            + '• ' + charName + ' НЕ знает мыслей, планов и слов главного героя, сказанных без него.\n'
+            + '• Запрещено показывать размышления об НПС в формате <think> или любом другом.\n'
+            + '• НПС появляются органично, без предупреждения и без метакомментариев.\n'
+            + 'Нарушение этих правил разрушает иммерсию.]';
     }
 
     // ============================================================
@@ -211,6 +221,59 @@
     }
 
     // ============================================================
+    //  Лорбук
+    // ============================================================
+
+    async function getAvailableLorebooks() {
+        try {
+            // ST API: worldInfoData — объект с именами лорбуков
+            if (window.worldInfoData) {
+                return Object.keys(window.worldInfoData);
+            }
+            // Альтернатива через context
+            const context = window.SillyTavern ? window.SillyTavern.getContext() : null;
+            if (context && context.worldInfo) {
+                return Object.keys(context.worldInfo);
+            }
+            // Попытка fetch списка через ST endpoint
+            const r = await fetch('/api/worldinfo/get', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            if (r.ok) {
+                const data = await r.json();
+                if (Array.isArray(data)) return data;
+                if (data && Array.isArray(data.entries)) return data.entries.map(function(e) { return e.name; });
+            }
+        } catch(e) {}
+        return [];
+    }
+
+    async function saveNpcToLorebook(npc, lorebookName) {
+        if (!lorebookName) return;
+        try {
+            // Формируем запись лорбука
+            const entry = {
+                key: [npc.name],
+                content: npc.description,
+                comment: 'Living World НПС | ' + npc.type + ' | ' + npc.location,
+                enabled: true,
+                selective: false,
+            };
+            // Пробуем через ST API
+            if (window.createWorldInfoEntry && typeof window.createWorldInfoEntry === 'function') {
+                await window.createWorldInfoEntry(lorebookName, entry);
+                return;
+            }
+            // Через fetch endpoint
+            await fetch('/api/worldinfo/create-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: lorebookName, entry: entry }),
+            });
+        } catch(e) {
+            console.warn('[LivingWorld] Лорбук save:', e.message);
+        }
+    }
+
+    // ============================================================
     //  AI запросы
     // ============================================================
 
@@ -241,15 +304,30 @@
         if (settings.useCustomEndpoint && settings.customEndpointUrl && settings.customApiKey) {
             return await callCustomEndpoint(settings, prompt);
         }
-        // Фолбэк на ST generateRaw
+
+        // Попытка через ST generateRaw
         if (typeof window.generateRaw === 'function') {
-            return await window.generateRaw(prompt, '', false, false, prompt, { max_new_tokens: 400 });
+            try {
+                return await window.generateRaw(prompt, '', false, false, prompt, { max_new_tokens: 400 });
+            } catch(e) {
+                console.warn('[LivingWorld] generateRaw failed:', e.message);
+            }
         }
+
+        // Попытка через ST generate (альтернативная функция)
+        if (typeof window.Generate === 'function') {
+            try {
+                return await window.Generate('quiet', { quietToLoud: false, force_name2: true });
+            } catch(e) {
+                console.warn('[LivingWorld] Generate failed:', e.message);
+            }
+        }
+
         throw new Error('Нет доступного AI эндпоинта. Включи кастомный эндпоинт в настройках Living World.');
     }
 
     // ============================================================
-    //  Получение настроек через ST context
+    //  Настройки
     // ============================================================
 
     function getSettings() {
@@ -257,7 +335,6 @@
         if (!window.extension_settings[EXT_NAME]) {
             window.extension_settings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
         }
-        // Заполняем недостающие ключи при обновлении
         var s = window.extension_settings[EXT_NAME];
         Object.keys(DEFAULT_SETTINGS).forEach(function(k) {
             if (s[k] === undefined) s[k] = DEFAULT_SETTINGS[k];
@@ -277,6 +354,94 @@
 
     var msgSinceEncounter = 0;
     var msgSinceAutonomy  = 0;
+
+    // ============================================================
+    //  Визуальная метка в сообщении нарратора
+    // ============================================================
+
+    /**
+     * Добавляет цветную полоску слева у последнего сообщения нарратора.
+     * Не тост, не иконка — тонкая акцентная черта как у Arc Catalyst.
+     */
+    function markLastNarratorMessage(type) {
+        try {
+            // Ищем последнее сообщение с именем "Нарратор"
+            setTimeout(function() {
+                var allMes = document.querySelectorAll('.mes');
+                var target = null;
+                for (var i = allMes.length - 1; i >= 0; i--) {
+                    var nameEl = allMes[i].querySelector('.name_text');
+                    if (nameEl && nameEl.textContent.trim() === 'Нарратор') {
+                        target = allMes[i];
+                        break;
+                    }
+                }
+                if (!target) return;
+                if (target.querySelector('.lw-msg-mark')) return; // уже есть
+
+                var colors = {
+                    passerby:  '#6a9fd8',
+                    hook:      '#c49a2a',
+                    important: '#d06060',
+                };
+                var icons = {
+                    passerby:  '👤',
+                    hook:      '🔍',
+                    important: '⭐',
+                };
+
+                var color = colors[type] || '#6a9fd8';
+                var icon  = icons[type] || '👤';
+
+                // Полоска слева
+                var bar = document.createElement('div');
+                bar.className = 'lw-msg-mark';
+                bar.title = 'Living World · ' + type;
+                bar.style.cssText = [
+                    'position:absolute',
+                    'left:0',
+                    'top:0',
+                    'bottom:0',
+                    'width:3px',
+                    'border-radius:3px 0 0 3px',
+                    'background:' + color,
+                    'opacity:0',
+                    'transition:opacity 0.4s ease',
+                    'pointer-events:none',
+                ].join(';');
+
+                // Иконка-бейдж рядом с именем
+                var badge = document.createElement('span');
+                badge.className = 'lw-msg-badge';
+                badge.textContent = icon;
+                badge.title = 'Living World НПС';
+                badge.style.cssText = [
+                    'font-size:11px',
+                    'margin-left:5px',
+                    'opacity:0.7',
+                    'vertical-align:middle',
+                    'cursor:default',
+                ].join(';');
+
+                // Позиционирование — обёртка сообщения должна быть relative
+                var mesBlock = target.querySelector('.mes_block') || target;
+                mesBlock.style.position = 'relative';
+                mesBlock.appendChild(bar);
+
+                var nameEl2 = target.querySelector('.name_text');
+                if (nameEl2) nameEl2.after(badge);
+
+                // Анимация появления
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                        bar.style.opacity = '1';
+                    });
+                });
+            }, 500);
+        } catch(e) {
+            console.warn('[LivingWorld] markLastNarratorMessage:', e);
+        }
+    }
 
     // ============================================================
     //  Основная логика
@@ -306,6 +471,16 @@
             }
         }
 
+        // Проверяем: ждём ли ручного энкаунтера?
+        const isPendingManual = s._pendingManualEncounter;
+        if (isPendingManual) {
+            s._pendingManualEncounter = false;
+            saveSettings();
+            msgSinceEncounter = 0;
+            await doEncounter(s, chat, chatId);
+            return;
+        }
+
         // Случайный энкаунтер
         if (s.encounterEnabled && msgSinceEncounter >= s.encounterEveryN && shouldTrigger(s.encounterChance)) {
             msgSinceEncounter = 0;
@@ -314,9 +489,6 @@
     }
 
     async function doEncounter(s, chat, chatId) {
-        const context  = window.SillyTavern ? window.SillyTavern.getContext() : null;
-        const charName = (context && context.name2) || window.name2 || 'Персонаж';
-
         const { name, gender, style } = resolveName(s, chat);
         const type     = rollEncounterType(s);
         const location = detectLocation(chat, s);
@@ -326,11 +498,21 @@
             const description = await generateText(s, buildEncounterPrompt(name, location, type, ctx));
             if (!description) return;
 
-            // Сохраняем НПС
-            saveNpc({ name: name, gender: gender, style: style, type: type, location: location, description: description, chatId: chatId, ts: Date.now() });
+            // Убираем возможные <think>...</think> блоки из ответа
+            const cleanDesc = description.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            if (!cleanDesc) return;
 
-            // Инжектим в чат
-            injectNarratorMsg(description, name, type);
+            // Сохраняем НПС в память
+            const npc = { name: name, gender: gender, style: style, type: type, location: location, description: cleanDesc, chatId: chatId, ts: Date.now() };
+            saveNpc(npc);
+
+            // Сохраняем в лорбук если нужно
+            if (s.saveNpcToLorebook && s.targetLorebook) {
+                await saveNpcToLorebook(npc, s.targetLorebook);
+            }
+
+            // Добавляем в чат
+            injectNarratorMsg(cleanDesc, name, type, chatId);
 
         } catch(e) {
             console.warn('[LivingWorld] Энкаунтер:', e.message);
@@ -340,19 +522,18 @@
         }
     }
 
-    function injectNarratorMsg(text, npcName, type) {
+    function injectNarratorMsg(text, npcName, type, chatId) {
         const emoji = { passerby: '👤', hook: '🔍', important: '⭐' }[type] || '👤';
-        const header = emoji + ' *[Living World — ' + npcName + ']*';
-        const full   = header + '\n\n' + text;
+        const full   = emoji + ' *[' + npcName + ']*\n\n' + text;
 
-        // Попытка добавить через ST API
         const context = window.SillyTavern ? window.SillyTavern.getContext() : null;
         if (context && typeof context.addOneMessage === 'function') {
             context.addOneMessage({ name: 'Нарратор', is_user: false, is_system: true, mes: full });
+            markLastNarratorMessage(type);
             return;
         }
 
-        // Фолбэк: показываем тостом
+        // Фолбэк
         if (typeof window.toastr !== 'undefined') {
             window.toastr.info(text.substring(0, 160) + '...', emoji + ' ' + npcName, { timeOut: 8000 });
         }
@@ -456,7 +637,23 @@
         <div class="lw-row">
             <label class="lw-chklbl"><input type="checkbox" id="lw_save_lore"/> 📖 Сохранять НПС в Lorebook</label>
         </div>
-        <button id="lw_trigger_now" class="lw-btn lw-btn-accent">⚡ Вызвать НПС прямо сейчас</button>
+        <!-- Выбор лорбука -->
+        <div id="lw_lorebook_row" class="lw-row" style="display:none;">
+            <span class="lw-lbl">Лорбук:</span>
+            <select id="lw_lorebook_sel" class="lw-sel"></select>
+            <button id="lw_reload_lb" class="lw-btn" title="Обновить список">🔄</button>
+        </div>
+        <div id="lw_lorebook_manual_row" class="lw-row" style="display:none;">
+            <span class="lw-lbl">или введи вручную:</span>
+            <input type="text" id="lw_lorebook_txt" class="lw-txt" placeholder="Имя лорбука…"/>
+        </div>
+        <!-- Кнопка: ждать НПС при следующем триггере -->
+        <div class="lw-row" style="margin-top:6px;">
+            <button id="lw_trigger_now" class="lw-btn lw-btn-accent">⚡ Вызвать НПС при следующем ответе</button>
+        </div>
+        <div id="lw_trigger_status" class="lw-hint" style="display:none;color:var(--SmartThemeQuoteColor,#7c8cf8);">
+            ✓ Ожидаем следующего ответа ИИ…
+        </div>
     </div>
 
     <!-- Автономия -->
@@ -506,10 +703,23 @@
 </div>`;
     }
 
+    async function populateLorebookDropdown() {
+        const sel = $('#lw_lorebook_sel').empty();
+        sel.append('<option value="">— выбрать —</option>');
+        try {
+            const books = await getAvailableLorebooks();
+            books.forEach(function(name) {
+                sel.append('<option value="' + name + '">' + name + '</option>');
+            });
+            const s = getSettings();
+            if (s.targetLorebook) sel.val(s.targetLorebook);
+        } catch(e) {}
+    }
+
     function bindUI() {
         const s = getSettings();
 
-        // Сворачивание по клику на шапку
+        // Сворачивание
         var collapsed = false;
         $('#lw_header_toggle').on('click', function() {
             collapsed = !collapsed;
@@ -527,7 +737,11 @@
 
         $('#lw_enc_on').prop('checked', s.encounterEnabled).on('change', function() { getSettings().encounterEnabled = this.checked; saveSettings(); });
         $('#lw_enc_every').val(s.encounterEveryN).on('input', function() { getSettings().encounterEveryN = parseInt(this.value)||5; saveSettings(); });
-        $('#lw_enc_chance').val(s.encounterChance).on('input', function() { getSettings().encounterChance = parseInt(this.value)||25; $('#lw_chance_val').text(this.value); saveSettings(); });
+        $('#lw_enc_chance').val(s.encounterChance).on('input', function() {
+            getSettings().encounterChance = parseInt(this.value)||25;
+            $('#lw_chance_val').text(this.value);
+            saveSettings();
+        });
         $('#lw_chance_val').text(s.encounterChance);
 
         $('#lw_w_pass').val(s.wPasserby).on('input', function() { getSettings().wPasserby = parseInt(this.value)||60; saveSettings(); });
@@ -536,13 +750,40 @@
 
         $('#lw_auto_loc').prop('checked', s.autoDetectLocation).on('change', function() { getSettings().autoDetectLocation = this.checked; saveSettings(); });
         $('#lw_manual_loc').val(s.manualLocation).on('input', function() { getSettings().manualLocation = this.value; saveSettings(); });
-        $('#lw_save_lore').prop('checked', s.saveNpcToLorebook).on('change', function() { getSettings().saveNpcToLorebook = this.checked; saveSettings(); });
 
+        // Лорбук
+        var showLorebookRow = function(show) {
+            $('#lw_lorebook_row, #lw_lorebook_manual_row').toggle(show);
+            if (show) populateLorebookDropdown();
+        };
+        $('#lw_save_lore').prop('checked', s.saveNpcToLorebook).on('change', function() {
+            getSettings().saveNpcToLorebook = this.checked;
+            showLorebookRow(this.checked);
+            saveSettings();
+        });
+        showLorebookRow(s.saveNpcToLorebook);
+
+        $('#lw_reload_lb').on('click', function() { populateLorebookDropdown(); });
+
+        $('#lw_lorebook_sel').on('change', function() {
+            getSettings().targetLorebook = this.value;
+            $('#lw_lorebook_txt').val('');
+            saveSettings();
+        });
+
+        $('#lw_lorebook_txt').val(s.targetLorebook).on('input', function() {
+            getSettings().targetLorebook = this.value;
+            $('#lw_lorebook_sel').val('');
+            saveSettings();
+        });
+
+        // Автономия
         $('#lw_auto_on').prop('checked', s.autonomyEnabled).on('change', function() { getSettings().autonomyEnabled = this.checked; saveSettings(); });
         $('#lw_auto_every').val(s.autonomyEveryN).on('input', function() { getSettings().autonomyEveryN = parseInt(this.value)||8; saveSettings(); });
         $('#lw_know_sep').prop('checked', s.knowledgeSeparation).on('change', function() { getSettings().knowledgeSeparation = this.checked; saveSettings(); });
         $('#lw_timeline').prop('checked', s.timelineEnabled).on('change', function() { getSettings().timelineEnabled = this.checked; saveSettings(); });
 
+        // Эндпоинт
         $('#lw_ep_on').prop('checked', s.useCustomEndpoint).on('change', function() {
             getSettings().useCustomEndpoint = this.checked;
             $('#lw_ep_panel').toggle(this.checked);
@@ -595,14 +836,32 @@
             setTimeout(function() { btn.text('🔗 Тест соединения').prop('disabled', false); }, 3000);
         });
 
-        // Ручной энкаунтер
-        $('#lw_trigger_now').on('click', async function() {
-            const context = window.SillyTavern ? window.SillyTavern.getContext() : null;
-            const chat    = (context && context.chat) || window.chat || [];
-            const chatId  = (context && context.chatId) || 'default';
-            window.toastr && window.toastr.info('Генерация НПС…', 'Living World');
-            await doEncounter(getSettings(), chat, chatId);
+        // Ручной энкаунтер — не генерируем сразу, ставим флаг
+        $('#lw_trigger_now').on('click', function() {
+            const st = getSettings();
+            st._pendingManualEncounter = true;
+            saveSettings();
+            $('#lw_trigger_status').show();
+            $('#lw_trigger_now').prop('disabled', true).text('⏳ Ожидание…');
+            // Автоматически убираем статус через 60 секунд если не сработало
+            setTimeout(function() {
+                if (getSettings()._pendingManualEncounter) {
+                    getSettings()._pendingManualEncounter = false;
+                    saveSettings();
+                }
+                $('#lw_trigger_status').hide();
+                $('#lw_trigger_now').prop('disabled', false).text('⚡ Вызвать НПС при следующем ответе');
+            }, 60000);
         });
+
+        // Сбрасываем кнопку когда флаг сработал
+        var triggerWatcher = setInterval(function() {
+            if (!getSettings()._pendingManualEncounter) {
+                $('#lw_trigger_status').hide();
+                $('#lw_trigger_now').prop('disabled', false).text('⚡ Вызвать НПС при следующем ответе');
+                clearInterval(triggerWatcher);
+            }
+        }, 500);
     }
 
     // ============================================================
@@ -610,7 +869,6 @@
     // ============================================================
 
     jQuery(async function() {
-        // Добавляем HTML панели настроек
         const settingsContainer = document.getElementById('extensions_settings');
         if (settingsContainer) {
             const wrapper = document.createElement('div');
@@ -619,13 +877,12 @@
             bindUI();
         }
 
-        // Подписываемся на события ST
         if (window.eventSource && window.event_types) {
             window.eventSource.on(window.event_types.MESSAGE_RECEIVED, onMessageReceived);
             window.eventSource.on(window.event_types.CHAT_COMPLETION_PROMPT_READY, onPromptReady);
         }
 
-        console.log('[LivingWorld] ✓ Загружено');
+        console.log('[LivingWorld] ✓ v2 Загружено');
     });
 
 })();
