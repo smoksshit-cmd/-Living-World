@@ -1,13 +1,9 @@
-// index.js — Living World (контекстный рандом имён + внешний API для энкаунтеров)
-// Работает без правок settings.html, но умеет читать доп. поля, если они есть.
-//
-// Требуемые пути зависят от версии ST. В актуальных билдах эти импорты валидны.
+// index.js — Living World (случайные NPC + контекстные имена + альтернативный API и список моделей)
 import { getContext, extension_settings, saveSettingsDebounced, renderExtensionTemplateAsync } from '../../../extensions.js';
 import { generateQuietPrompt, printMessages } from '../../../script.js';
 
 const EXT_NAME = 'living-world';
 
-// ====== SETTINGS (c дефолтами) ======
 const defaultSettings = {
     enabled: true,
 
@@ -19,30 +15,28 @@ const defaultSettings = {
     encounter_chance: 30,
 
     // Name generation
-    // name_mode: 'context' — попытка определить культуру имени по контексту (кириллица -> RU, латиница -> EN)
-    // name_mode: 'checkbox' — использовать отмеченные чекбоксы
-    name_mode: 'context',
+    name_mode: 'context', // context | checkbox
     name_russian: true,
     name_english: true,
     name_japanese: false,
     name_fantasy: false,
     gender_default: 'random', // random | male | female | more_male | more_female
 
-    // Alt API (OpenAI-compatible) для генерации NPC/имён — чтобы не есть токены основного
+    // Alt API (OpenAI-compatible)
     alt_api_enabled: false,
-    alt_api_url: 'https://api.openrouter.ai/v1/chat/completions', // или свой совместимый endpoint
+    alt_api_url: 'https://api.openrouter.ai/v1/chat/completions',
     alt_api_key: '',
-    alt_api_model: 'openrouter/auto',
+    alt_api_model: '',
     alt_api_temperature: 0.9,
-    alt_api_use_for_names: false, // true => имя тоже просим у внешнего API, иначе — локальный банк
+    alt_api_use_for_names: false,
 
-    // Служебное
+    // Service
     _message_counter: 0,
     _npc_registry: [],
     _last_chat_len: 0,
+    _models_cache: [],
 };
 
-// ====== БАНКИ ИМЁН (локальные, для фоллбека и оффлайн режима) ======
 const NAME_BANKS = {
     russian: {
         male: ['Алексей','Дмитрий','Иван','Михаил','Николай','Сергей','Павел','Владимир','Григорий','Егор','Руслан','Олег','Кирилл','Артём','Александр','Тимофей'],
@@ -62,7 +56,6 @@ const NAME_BANKS = {
     },
 };
 
-// ====== ТРИГГЕР-СЛОВА ДВИЖЕНИЯ ======
 const MOVEMENT_WORDS = [
     'иду','выхожу','захожу','направляюсь','отправляюсь','прихожу','подхожу','приближаюсь',
     'walk','enter','leave','head to','arrive','approach','go to','step in','step out'
@@ -70,27 +63,21 @@ const MOVEMENT_WORDS = [
 
 function getSettings() {
     if (!extension_settings[EXT_NAME]) extension_settings[EXT_NAME] = structuredClone(defaultSettings);
-    // Подстрахуем версии без новых ключей
     for (const k of Object.keys(defaultSettings)) {
-        if (!Object.hasOwn(extension_settings[EXT_NAME], k)) {
-            extension_settings[EXT_NAME][k] = defaultSettings[k];
-        }
+        if (!Object.hasOwn(extension_settings[EXT_NAME], k)) extension_settings[EXT_NAME][k] = defaultSettings[k];
     }
     return extension_settings[EXT_NAME];
 }
 
-// ====== УТИЛИТЫ ======
 function roll(pct) { return Math.random() * 100 < pct; }
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)] || null; }
 
-// Простейшее определение "культура контекста": кириллица vs латиница
 function detectLocaleByContextText(text) {
     const cyr = (text.match(/[а-яё]/gi) || []).length;
     const lat = (text.match(/[a-z]/gi) || []).length;
     if (cyr === 0 && lat === 0) return 'english';
     if (cyr >= lat * 1.2) return 'russian';
     if (lat >= cyr * 1.2) return 'english';
-    // Нечётко — вернём обе
     return 'mixed';
 }
 
@@ -98,48 +85,103 @@ function genderFromSetting(genderSetting) {
     if (genderSetting === 'male' || genderSetting === 'female') return genderSetting;
     if (genderSetting === 'more_male') return roll(70) ? 'male' : 'female';
     if (genderSetting === 'more_female') return roll(70) ? 'female' : 'male';
-    // random
     return roll(50) ? 'male' : 'female';
 }
 
-// ====== ALT API (OpenAI-compatible chat/completions) ======
-async function altApiChatCompletion({ url, apiKey, model, temperature, messages, max_tokens = 300 }) {
-    const headers = {
-        'Content-Type': 'application/json',
-    };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// ========== ALT API (OpenAI-compatible) ==========
+function deriveModelsCandidates(url) {
+    try {
+        const u = new URL(url);
+        const path = u.pathname.replace(/\/+$/, '');
+        const host = `${u.protocol}//${u.host}`;
+        const candidates = [];
 
-    const body = {
-        model,
-        temperature,
-        max_tokens,
-        messages,
-    };
+        if (/\/chat\/completions$/.test(path)) {
+            candidates.push(`${host}${path.replace(/\/chat\/completions$/, '/models')}`);
+        }
+        if (/\/v1$/.test(path)) {
+            candidates.push(`${host}${path}/models`);
+        }
+        candidates.push(`${host}${path}/models`);
+        if (!path || path === '/') candidates.push(`${host}/v1/models`);
+        return [...new Set(candidates)];
+    } catch {
+        return [url.replace(/\/chat\/completions$/, '/models'), `${url}/models`, `${url}/v1/models`];
+    }
+}
 
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-    });
+function parseModelsFromResponse(data) {
+    let raw = [];
+    if (Array.isArray(data)) raw = data;
+    else if (Array.isArray(data?.data)) raw = data.data;
+    else if (Array.isArray(data?.models)) raw = data.models;
+    else if (Array.isArray(data?.items)) raw = data.items;
 
-    if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(`Alt API error: ${resp.status} ${resp.statusText} ${text ? '- ' + text : ''}`);
+    const ids = new Set();
+    for (const it of raw) {
+        if (!it) continue;
+        if (typeof it === 'string') ids.add(it);
+        else if (typeof it.id === 'string') ids.add(it.id);
+        else if (typeof it.model === 'string') ids.add(it.model);
+        else if (typeof it.name === 'string') ids.add(it.name);
     }
 
+    if (ids.size === 0 && data?.object === 'list' && Array.isArray(data?.data)) {
+        for (const it of data.data) {
+            if (typeof it?.id === 'string') ids.add(it.id);
+        }
+    }
+
+    return Array.from(ids);
+}
+
+async function altApiFetchModels(settings) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (settings.alt_api_key) headers['Authorization'] = `Bearer ${settings.alt_api_key}`;
+
+    const candidates = deriveModelsCandidates(settings.alt_api_url);
+    let lastError = null;
+
+    for (const url of candidates) {
+        try {
+            const resp = await fetch(url, { method: 'GET', headers });
+            if (!resp.ok) {
+                lastError = new Error(`HTTP ${resp.status} ${resp.statusText}`);
+                continue;
+            }
+            const data = await resp.json();
+            const list = parseModelsFromResponse(data);
+            if (list.length) return list;
+            lastError = new Error('Ответ получен, но список моделей пуст или в неизвестном формате');
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    throw lastError || new Error('Не удалось получить список моделей');
+}
+
+async function altApiChatCompletion({ url, apiKey, model, temperature, messages, max_tokens = 300 }) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const body = { model, temperature, max_tokens, messages };
+
+    const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`Alt API error: ${resp.status} ${resp.statusText}${text ? ` - ${text}` : ''}`);
+    }
     const data = await resp.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error('Alt API: empty content');
+    if (!content) throw new Error('Alt API: пустой ответ/контент');
     return content.trim();
 }
 
-// ====== ИМЕНА: ПО КОНТЕКСТУ ИЛИ ЧЕКБОКСАМ ======
+// ========== ИМЕНА ==========
 async function getNPCName({ contextText, gender, settings }) {
-    // 1) Если включён внешний API для имён — попробуем взять имя оттуда
-    if (settings.alt_api_enabled && settings.alt_api_use_for_names && settings.alt_api_key) {
+    if (settings.alt_api_enabled && settings.alt_api_use_for_names && settings.alt_api_key && settings.alt_api_url) {
         try {
             const sys = 'Ты помощник, который подбирает реалистичные имена для NPC в ролевой сцене. Отвечай только именем, без дополнительных слов.';
-            // Подсказываем предпочтительный "культурный" стиль имён по контексту или чекбоксам
             let hint = '';
             if (settings.name_mode === 'context') {
                 const locale = detectLocaleByContextText(contextText || '');
@@ -154,14 +196,13 @@ async function getNPCName({ contextText, gender, settings }) {
                 if (settings.name_fantasy) prefs.push('Fantasy');
                 hint = `Prefer these styles: ${prefs.join(', ')}.`;
             }
-
             const genderHint = gender === 'male' ? 'мужское' : 'женское';
             const prompt = `Сцена: ${contextText?.slice(0, 400) || ''}\nТребуется ${genderHint} имя для NPC. ${hint}\nОтветь одним именем без пояснений.`;
 
             const name = await altApiChatCompletion({
                 url: settings.alt_api_url,
                 apiKey: settings.alt_api_key,
-                model: settings.alt_api_model,
+                model: settings.alt_api_model || 'gpt-3.5-turbo',
                 temperature: 0.7,
                 max_tokens: 10,
                 messages: [
@@ -170,7 +211,6 @@ async function getNPCName({ contextText, gender, settings }) {
                 ],
             });
 
-            // Санитизация — выдрать первое слово/имя
             const sanitized = String(name).split(/[\s,./;:!?\-]/).filter(Boolean)[0];
             if (sanitized && sanitized.length <= 32) return sanitized;
         } catch (e) {
@@ -178,20 +218,18 @@ async function getNPCName({ contextText, gender, settings }) {
         }
     }
 
-    // 2) Локальный выбор: по контексту
     let pools = [];
     if (settings.name_mode === 'context') {
         const locale = detectLocaleByContextText(contextText || '');
         if (locale === 'russian') pools = [NAME_BANKS.russian];
         else if (locale === 'english') pools = [NAME_BANKS.english];
-        else pools = [NAME_BANKS.russian, NAME_BANKS.english]; // mixed
+        else pools = [NAME_BANKS.russian, NAME_BANKS.english];
     } else {
-        // 3) Локальный выбор: по галочкам
         if (settings.name_russian) pools.push(NAME_BANKS.russian);
         if (settings.name_english) pools.push(NAME_BANKS.english);
         if (settings.name_japanese) pools.push(NAME_BANKS.japanese);
         if (settings.name_fantasy) pools.push(NAME_BANKS.fantasy);
-        if (pools.length === 0) pools.push(NAME_BANKS.english);
+        if (!pools.length) pools.push(NAME_BANKS.english);
     }
 
     const bank = pickRandom(pools);
@@ -199,12 +237,11 @@ async function getNPCName({ contextText, gender, settings }) {
     return pickRandom(list) || (gender === 'male' ? 'Alex' : 'Anna');
 }
 
-// ====== ГЕНЕРАЦИЯ СЛУЧАЙНОГО НПС ======
+// ========== NPC ==========
 async function generateNPCEncounter() {
     const settings = getSettings();
     const ctx = getContext();
 
-    // Берем немного контекста сцены (последние 6 сообщений)
     const recent = (ctx.chat || []).slice(-6).map(m => m.mes).join(' ') || '';
     const gender = genderFromSetting(settings.gender_default);
     const name = await getNPCName({ contextText: recent, gender, settings });
@@ -222,11 +259,11 @@ async function generateNPCEncounter() {
 
     let description = '';
     try {
-        if (settings.alt_api_enabled && settings.alt_api_key) {
+        if (settings.alt_api_enabled && settings.alt_api_key && settings.alt_api_url) {
             description = await altApiChatCompletion({
                 url: settings.alt_api_url,
                 apiKey: settings.alt_api_key,
-                model: settings.alt_api_model,
+                model: settings.alt_api_model || 'gpt-3.5-turbo',
                 temperature: settings.alt_api_temperature,
                 max_tokens: 180,
                 messages: [
@@ -235,7 +272,6 @@ async function generateNPCEncounter() {
                 ],
             });
         } else {
-            // Фоллбек на основной провайдер ST (тратит токены основного подключения)
             description = await generateQuietPrompt(`${sys}\n\n${userPrompt}`, false, false);
         }
     } catch (e) {
@@ -248,9 +284,8 @@ async function generateNPCEncounter() {
     if (settings._npc_registry.length > 50) settings._npc_registry.shift();
     saveSettingsDebounced();
 
-    // Инъекция в чат как мировое событие
     await injectMessageIntoChat(`Мировое событие: появляется ${name}. ${npc.description}`, 'Мир');
-    renderNpcRegistry(); // обновим список в настройках, если открыт
+    renderNpcRegistry();
 
     return npc;
 }
@@ -268,7 +303,7 @@ async function injectMessageIntoChat(text, senderName = 'Мир') {
     await printMessages();
 }
 
-// ====== ENCOUNTER ТРИГГЕР ======
+// ========== ENCOUNTER ТРИГГЕР ==========
 async function maybeTriggerEncounter(latestMessageText) {
     const settings = getSettings();
     if (!settings.enabled || !settings.encounter_enabled) return;
@@ -296,8 +331,7 @@ async function maybeTriggerEncounter(latestMessageText) {
     saveSettingsDebounced();
 }
 
-// ====== WATCHER новых сообщений (без завязки на внутренние события) ======
-// Наблюдаем за ростом длины чата чтобы не зависеть от внутренних event_types
+// ========== WATCHER новых сообщений ==========
 let _watcherStarted = false;
 function startChatWatcher() {
     if (_watcherStarted) return;
@@ -309,7 +343,6 @@ function startChatWatcher() {
             const len = (ctx.chat || []).length;
             const settings = getSettings();
             if (len !== settings._last_chat_len) {
-                // Поймали новое сообщение
                 const lastMsg = (ctx.chat || [])[len - 1];
                 settings._last_chat_len = len;
                 saveSettingsDebounced();
@@ -324,7 +357,7 @@ function startChatWatcher() {
     }, 1200);
 }
 
-// ====== UI BINDINGS (опционально, если в settings.html есть элементы) ======
+// ========== UI ==========
 function bindUI() {
     const byId = (id) => document.getElementById(id);
 
@@ -337,7 +370,6 @@ function bindUI() {
         encounter_interval: byId('lw-encounter-interval'),
         encounter_chance: byId('lw-encounter-chance'),
 
-        // Имёна
         name_mode_context: byId('lw-name-mode-context'),
         name_russian: byId('lw-name-russian'),
         name_english: byId('lw-name-english'),
@@ -350,6 +382,8 @@ function bindUI() {
         alt_api_url: byId('lw-altapi-url'),
         alt_api_key: byId('lw-altapi-key'),
         alt_api_model: byId('lw-altapi-model'),
+        alt_api_connect: byId('lw-altapi-connect'),
+        alt_api_status: byId('lw-altapi-status'),
         alt_api_temperature: byId('lw-altapi-temperature'),
         alt_api_use_for_names: byId('lw-altapi-use-for-names'),
 
@@ -367,8 +401,26 @@ function bindUI() {
         if (type === 'number') return Number(el.value) || 0;
         return el.value;
     }
+    function setStatus(text, good = false) {
+        if (!fields.alt_api_status) return;
+        fields.alt_api_status.textContent = text;
+        fields.alt_api_status.style.borderColor = good ? 'var(--SuccessColor,#3fae3f)' : 'var(--SmartThemeBorderColor)';
+        fields.alt_api_status.style.color = good ? 'var(--SuccessColor,#3fae3f)' : 'var(--SmartThemeBodyColor)';
+    }
+    function populateModels(list) {
+        if (!fields.alt_api_model) return;
+        const sel = fields.alt_api_model;
+        sel.innerHTML = '<option value="">— не выбрано —</option>';
+        for (const m of list) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            sel.appendChild(opt);
+        }
+        if (s.alt_api_model) sel.value = s.alt_api_model;
+    }
 
-    // Инициализация значений
+    // Инициализация UI
     setIf(fields.enabled, s.enabled);
 
     setIf(fields.encounter_enabled, s.encounter_enabled);
@@ -387,11 +439,12 @@ function bindUI() {
     setIf(fields.alt_api_enabled, s.alt_api_enabled);
     setIf(fields.alt_api_url, s.alt_api_url);
     setIf(fields.alt_api_key, s.alt_api_key);
-    setIf(fields.alt_api_model, s.alt_api_model);
     setIf(fields.alt_api_temperature, s.alt_api_temperature);
     setIf(fields.alt_api_use_for_names, s.alt_api_use_for_names);
+    setStatus(s._models_cache?.length ? `моделей: ${s._models_cache.length}` : 'не подключено', !!s._models_cache?.length);
+    populateModels(s._models_cache || []);
 
-    // Сохранители
+    // Сохранение изменений
     const save = () => {
         const st = getSettings();
         if (fields.enabled) st.enabled = read(fields.enabled);
@@ -412,9 +465,9 @@ function bindUI() {
         if (fields.alt_api_enabled) st.alt_api_enabled = read(fields.alt_api_enabled);
         if (fields.alt_api_url) st.alt_api_url = read(fields.alt_api_url);
         if (fields.alt_api_key) st.alt_api_key = read(fields.alt_api_key);
-        if (fields.alt_api_model) st.alt_api_model = read(fields.alt_api_model);
         if (fields.alt_api_temperature) st.alt_api_temperature = Number(read(fields.alt_api_temperature, 'number')) || 0.9;
         if (fields.alt_api_use_for_names) st.alt_api_use_for_names = read(fields.alt_api_use_for_names);
+        if (fields.alt_api_model) st.alt_api_model = read(fields.alt_api_model);
 
         saveSettingsDebounced();
     };
@@ -423,6 +476,33 @@ function bindUI() {
         if (!el) continue;
         el.addEventListener('change', save);
         el.addEventListener('input', save);
+    }
+
+    // Кнопка "Подключиться / Список моделей"
+    if (fields.alt_api_connect) {
+        fields.alt_api_connect.addEventListener('click', async () => {
+            const st = getSettings();
+            st.alt_api_url = read(fields.alt_api_url) || st.alt_api_url;
+            st.alt_api_key = read(fields.alt_api_key) || st.alt_api_key;
+            saveSettingsDebounced();
+
+            if (!st.alt_api_url || !st.alt_api_key) {
+                setStatus('укажи endpoint и ключ', false);
+                return;
+            }
+
+            setStatus('запрос списка моделей...');
+            try {
+                const models = await altApiFetchModels(st);
+                st._models_cache = models;
+                saveSettingsDebounced();
+                populateModels(models);
+                setStatus(`успешно, моделей: ${models.length}`, true);
+            } catch (e) {
+                console.warn('Model list fetch failed:', e);
+                setStatus('ошибка получения моделей (см. консоль)', false);
+            }
+        });
     }
 
     if (fields.manual_encounter_btn) {
@@ -463,21 +543,16 @@ function escapeHtml(s) {
         .replaceAll('>', '&gt;');
 }
 
-// ====== ИНИЦ ======
+// ========== INIT ==========
 (async function init() {
     try {
-        // Рендерим шаблон (если settings.html присутствует)
         await renderExtensionTemplateAsync(EXT_NAME, 'settings.html');
     } catch (e) {
-        // Ок, без UI тоже работаем
         console.warn('Living World: settings UI not rendered (no settings.html?)', e);
     }
 
-    // Привяжем UI, если есть
     try { bindUI(); } catch (e) { console.warn('Living World UI bind error:', e); }
 
-    // Стартуем наблюдатель чата
     startChatWatcher();
-
     console.log('[Living World] loaded');
 })();
