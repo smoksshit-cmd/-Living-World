@@ -223,32 +223,58 @@
     //  Лорбук ST
     // ============================================================
 
-    function saveNpcToSTLorebook(npc) {
+    async function saveNpcToSTLorebook(npc) {
         var s = getSettings();
         if (!s.saveNpcToLorebook || !s.targetLorebook) return;
         try {
-            var ctx = getSTContext();
-            var wi  = (ctx && (ctx.world_info || ctx.worldInfo)) || window.world_info;
-            if (!wi) return;
-            var book = wi.entries ? wi : wi[s.targetLorebook];
-            if (!book || !book.entries) return;
+            // world_names — глобал из world-info.js ST
+            // world_info — объект { bookName: { entries: {...} } }
+            var wi = window.world_info;
+            if (!wi || !wi[s.targetLorebook]) {
+                console.warn('[LivingWorld] лорбук не найден:', s.targetLorebook);
+                return;
+            }
+            var book = wi[s.targetLorebook];
+            if (!book.entries) book.entries = {};
             var id = Date.now();
             book.entries[id] = {
-                uid: id, key: [npc.name], keysecondary: [],
-                comment: '[Living World] '+npc.name,
-                content: npc.name+' — '+(TYPE_LABELS[npc.type]||npc.type)+(npc.location?'. Met at: '+npc.location+'.':'.'),
-                constant: false, selective: true, selectiveLogic: 0,
-                order: 100, position: 0, disable: false,
+                uid:            id,
+                key:            [npc.name],
+                keysecondary:   [],
+                comment:        '[Living World] ' + npc.name,
+                content:        npc.name + ' — ' + (TYPE_LABELS[npc.type]||npc.type)
+                                + (npc.location ? '. Замечен в: ' + npc.location + '.' : '.'),
+                constant:       false,
+                selective:      true,
+                selectiveLogic: 0,
+                addMemo:        true,
+                order:          100,
+                position:       0,
+                disable:        false,
+                depth:          4,
+                probability:    100,
+                useProbability: false,
             };
-            if (typeof window.saveWorldInfo === 'function') window.saveWorldInfo();
+            // saveWorldInfo(name, data) — стандартная функция ST из world-info.js
+            if (typeof window.saveWorldInfo === 'function') {
+                await window.saveWorldInfo(s.targetLorebook, book);
+                console.log('[LivingWorld] НПС записан в лорбук:', npc.name, '->', s.targetLorebook);
+            }
         } catch(e){ console.warn('[LivingWorld] lorebook error:', e); }
     }
 
     function getAvailableLorebooks() {
         try {
-            var names = window.world_names || [];
-            if (!names.length) { var ctx = getSTContext(); names = (ctx && ctx.world_names)||[]; }
-            return names;
+            // ST экспортирует world_names как глобал из world-info.js
+            if (Array.isArray(window.world_names) && window.world_names.length) {
+                return window.world_names.slice();
+            }
+            // Фолбэк через контекст
+            var ctx = getSTContext();
+            if (ctx && Array.isArray(ctx.world_names) && ctx.world_names.length) {
+                return ctx.world_names.slice();
+            }
+            return [];
         } catch(e){ return []; }
     }
 
