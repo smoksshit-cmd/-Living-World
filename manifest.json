@@ -1,12 +1,12 @@
 {
-  "display_name": "Black Market",
-  "loading_order": 100,
-  "requires": [],
-  "optional": [],
-  "js": "index.js",
-  "css": "",
-  "author": "BlackMarket",
+  "display_name": "Living World",
   "version": "1.0.0",
-  "homePage": "",
-  "auto_update": false
+  "description": "Автономные НПС, случайные встречи и живой мир для ролевых игр. Персонажи живут своей жизнью, НПС появляются случайно, ведётся хроника событий за кадром.",
+  "js": "index.js",
+  "author": "LivingWorld",
+  "homePage": "https://github.com/your-repo/living-world-extension",
+  "tags": ["roleplay", "npc", "world", "narrative"],
+  "st_dependencies": {
+    "features": ["chat_completion"]
+  }
 }
