@@ -220,23 +220,68 @@
     }
 
     // ============================================================
-    //  Лорбук ST
+    //  Лорбук ST — через REST API (без ES-импортов)
     // ============================================================
+
+    // Получить список лорбуков через API ST
+    async function getAvailableLorebooks() {
+        try {
+            var r = await fetch('/api/worlds/all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'  });
+            if (r.ok) {
+                var data = await r.json();
+                if (Array.isArray(data)) return data;
+                if (Array.isArray(data.worlds)) return data.worlds;
+            }
+        } catch(e) {}
+        // Фолбэк: window.world_names иногда доступен если другое расширение его экспортировало
+        if (Array.isArray(window.world_names) && window.world_names.length) return window.world_names.slice();
+        return [];
+    }
+
+    // Загрузить данные конкретного лорбука
+    async function loadLorebookData(name) {
+        try {
+            var r = await fetch('/api/worlds/get', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name }),
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return await r.json();
+        } catch(e) {
+            console.warn('[LivingWorld] loadLorebookData failed:', e);
+            return null;
+        }
+    }
+
+    // Сохранить лорбук через API
+    async function saveLorebookData(name, data) {
+        try {
+            var r = await fetch('/api/worlds/edit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name, data: data }),
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return true;
+        } catch(e) {
+            console.warn('[LivingWorld] saveLorebookData failed:', e);
+            return false;
+        }
+    }
 
     async function saveNpcToSTLorebook(npc) {
         var s = getSettings();
         if (!s.saveNpcToLorebook || !s.targetLorebook) return;
         try {
-            // world_names — глобал из world-info.js ST
-            // world_info — объект { bookName: { entries: {...} } }
-            var wi = window.world_info;
-            if (!wi || !wi[s.targetLorebook]) {
-                console.warn('[LivingWorld] лорбук не найден:', s.targetLorebook);
-                return;
-            }
-            var book = wi[s.targetLorebook];
+            var book = await loadLorebookData(s.targetLorebook);
+            if (!book) { console.warn('[LivingWorld] не удалось загрузить лорбук:', s.targetLorebook); return; }
             if (!book.entries) book.entries = {};
-            var id = Date.now();
+
+            // Найти максимальный uid чтобы не дублировать
+            var maxUid = Object.values(book.entries).reduce(function(m, e) { return Math.max(m, e.uid || 0); }, 0);
+            var id = maxUid + 1;
+
             book.entries[id] = {
                 uid:            id,
                 key:            [npc.name],
@@ -254,36 +299,26 @@
                 depth:          4,
                 probability:    100,
                 useProbability: false,
+                extensions:     { lw_npc: true },
             };
-            // saveWorldInfo(name, data) — стандартная функция ST из world-info.js
-            if (typeof window.saveWorldInfo === 'function') {
-                await window.saveWorldInfo(s.targetLorebook, book);
+
+            var ok = await saveLorebookData(s.targetLorebook, book);
+            if (ok) {
                 console.log('[LivingWorld] НПС записан в лорбук:', npc.name, '->', s.targetLorebook);
             }
         } catch(e){ console.warn('[LivingWorld] lorebook error:', e); }
     }
 
-    function getAvailableLorebooks() {
-        try {
-            // ST экспортирует world_names как глобал из world-info.js
-            if (Array.isArray(window.world_names) && window.world_names.length) {
-                return window.world_names.slice();
-            }
-            // Фолбэк через контекст
-            var ctx = getSTContext();
-            if (ctx && Array.isArray(ctx.world_names) && ctx.world_names.length) {
-                return ctx.world_names.slice();
-            }
-            return [];
-        } catch(e){ return []; }
-    }
-
-    function refreshLorebookSelect() {
+    async function refreshLorebookSelect() {
         var sel = document.getElementById('lw_lorebook_sel');
         if (!sel) return;
-        var books = getAvailableLorebooks();
+        sel.innerHTML = '<option value="">загрузка…</option>';
+        var books = await getAvailableLorebooks();
         var s = getSettings();
         sel.innerHTML = '<option value="">— не выбран —</option>';
+        if (!books.length) {
+            sel.innerHTML += '<option disabled>лорбуки не найдены</option>';
+        }
         books.forEach(function(b){
             var opt = document.createElement('option');
             opt.value = b; opt.textContent = b;
@@ -581,7 +616,7 @@
     //  Биндинг UI
     // ============================================================
 
-    function bindUI() {
+    async function bindUI() {
         var s = getSettings();
         var collapsed = false;
 
@@ -614,9 +649,9 @@
         });
 
         $('#lw_save_lore').prop('checked', s.saveNpcToLorebook).on('change', function() { getSettings().saveNpcToLorebook = this.checked; saveSettings(); });
-        refreshLorebookSelect();
+        await refreshLorebookSelect();
         $('#lw_lorebook_sel').on('change', function() { getSettings().targetLorebook = this.value; saveSettings(); });
-        $('#lw_refresh_lb').on('click', refreshLorebookSelect);
+        $('#lw_refresh_lb').on('click', function() { refreshLorebookSelect(); });
 
         $('#lw_auto_on').prop('checked', s.autonomyEnabled).on('change', function() { getSettings().autonomyEnabled = this.checked; saveSettings(); });
         $('#lw_auto_every').val(s.autonomyEveryN).on('input', function() { getSettings().autonomyEveryN = parseInt(this.value)||8; saveSettings(); });
@@ -692,7 +727,7 @@
             var div = document.createElement('div');
             div.innerHTML = buildHTML();
             container.appendChild(div.firstElementChild);
-            bindUI();
+            await bindUI();
         }
 
         var es = window.eventSource;
