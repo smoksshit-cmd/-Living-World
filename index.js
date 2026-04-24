@@ -1,131 +1,149 @@
-// index.js — Living World (NPC + Context Names)
-import { getContext, extension_settings, saveSettingsDebounced, renderExtensionTemplateAsync } from '../extensions.js';
-import { generateQuietPrompt, printMessages } from '../script.js';
+// index.js — Living World (NPC & Context Names)
+// Исправленные пути для SillyTavern
+import { 
+    getContext, 
+    extension_settings, 
+    saveSettingsDebounced, 
+    renderExtensionTemplateAsync 
+} from '../../../extensions.js';
+
+import { 
+    generateQuietPrompt, 
+    printMessages 
+} from '../../../script.js';
 
 const EXT_NAME = 'living-world';
 
-// Дефолтные настройки
+// Стандартные настройки
 const defaultSettings = {
     enabled: true,
-    encounter_enabled: true,
-    encounter_trigger_messages: true,
-    encounter_trigger_movement: true,
-    encounter_interval: 5,
     encounter_chance: 30,
+    encounter_interval: 5,
     name_mode: 'context',
-    name_russian: true,
-    name_english: true,
     gender_default: 'random',
     alt_api_enabled: false,
     alt_api_url: 'https://api.openrouter.ai/v1/chat/completions',
     alt_api_key: '',
-    alt_api_model: '',
-    alt_api_temperature: 0.9,
-    alt_api_use_for_names: false,
+    alt_api_model: 'openai/gpt-3.5-turbo',
     _message_counter: 0,
-    _npc_registry: [],
     _last_chat_len: 0,
-    _models_cache: [],
+    _npc_registry: [],
 };
 
+// Банк имен (упрощенный для стабильности)
 const NAME_BANKS = {
     russian: {
-        male: ['Алексей','Дмитрий','Иван','Михаил','Николай','Сергей','Павел','Владимир'],
-        female: ['Анастасия','Екатерина','Мария','Ольга','Наталья','Анна','Елена','Татьяна'],
+        male: ['Алексей', 'Дмитрий', 'Артем', 'Николай', 'Михаил'],
+        female: ['Анна', 'Мария', 'Елена', 'Дарья', 'Ольга']
     },
     english: {
-        male: ['Arthur','Henry','William','George','Robert','James','Edward','Alexander'],
-        female: ['Eleanor','Margaret','Catherine','Elizabeth','Charlotte','Mary','Alice','Sarah'],
+        male: ['Arthur', 'James', 'Edward', 'Robert'],
+        female: ['Emma', 'Alice', 'Sarah', 'Olivia']
     }
 };
 
-const MOVEMENT_WORDS = ['иду','выхожу','захожу','направляюсь','walk','enter','leave','approach'];
-
 function getSettings() {
-    if (!extension_settings[EXT_NAME]) extension_settings[EXT_NAME] = JSON.parse(JSON.stringify(defaultSettings));
+    if (!extension_settings[EXT_NAME]) {
+        extension_settings[EXT_NAME] = Object.assign({}, defaultSettings);
+    }
     return extension_settings[EXT_NAME];
 }
 
-// Поиск имен через Alt API
-async function altApiChatCompletion({ url, apiKey, model, temperature, messages }) {
-    const headers = { 'Content-Type': 'application/json' };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-    const body = JSON.stringify({ model, temperature, messages, max_tokens: 150 });
-    const resp = await fetch(url, { method: 'POST', headers, body });
-    
-    if (!resp.ok) throw new Error(`API Error: ${resp.status}`);
-    const data = await resp.json();
-    return data?.choices?.[0]?.message?.content?.trim();
-}
-
-// Основная логика генерации NPC
-async function generateNPCEncounter() {
-    const settings = getSettings();
+/**
+ * Отправка сообщения в чат от имени системы
+ */
+async function injectToChat(text) {
     const ctx = getContext();
     if (!ctx.chat) return;
 
-    const recent = ctx.chat.slice(-5).map(m => m.mes).join(' ');
-    const gender = settings.gender_default === 'random' ? (Math.random() > 0.5 ? 'male' : 'female') : settings.gender_default;
-    
-    // Выбор имени (упрощено для примера)
-    const nameList = NAME_BANKS.russian[gender];
-    const name = nameList[Math.floor(Math.random() * nameList.length)];
-
-    const prompt = `Опиши появление NPC: ${name} (${gender}). Контекст: ${recent.slice(0, 300)}. Пиши 2 предложения.`;
-
-    try {
-        let description = "";
-        if (settings.alt_api_enabled && settings.alt_api_key) {
-            description = await altApiChatCompletion({
-                url: settings.alt_api_url,
-                apiKey: settings.alt_api_key,
-                model: settings.alt_api_model,
-                messages: [{ role: 'user', content: prompt }]
-            });
-        } else {
-            description = await generateQuietPrompt(prompt);
-        }
-
-        if (description) {
-            await injectMessageIntoChat(description, name);
-        }
-    } catch (e) {
-        console.error('[Living World] Ошибка генерации:', e);
-    }
-}
-
-async function injectMessageIntoChat(text, npcName) {
-    const ctx = getContext();
     ctx.chat.push({
         name: 'Мир',
         is_system: true,
+        is_user: false,
         mes: `*${text}*`,
-        extra: { living_world: true }
+        extra: { living_world: true },
     });
+    
     await ctx.saveChat();
     await printMessages();
 }
 
-// Инициализация
-(async function init() {
-    try {
-        // Убедись, что settings.html лежит в той же папке
-        await renderExtensionTemplateAsync(EXT_NAME, 'settings.html');
-        console.log('[Living World] UI загружен');
-    } catch (e) {
-        console.warn('[Living World] Ошибка загрузки UI:', e);
-    }
+/**
+ * Генерация события с NPC
+ */
+async function triggerEncounter() {
+    const settings = getSettings();
+    const ctx = getContext();
     
-    // Следим за новыми сообщениями
+    const gender = settings.gender_default === 'random' 
+        ? (Math.random() > 0.5 ? 'male' : 'female') 
+        : settings.gender_default;
+    
+    // Выбираем случайное имя из банка
+    const lang = (ctx.chat && ctx.chat.length > 0 && /[а-яё]/i.test(ctx.chat[ctx.chat.length-1].mes)) ? 'russian' : 'english';
+    const name = NAME_BANKS[lang][gender][Math.floor(Math.random() * NAME_BANKS[lang][gender].length)];
+
+    const prompt = `Кратко (1-2 предложения) опиши появление случайного персонажа по имени ${name}. Он просто проходит мимо или занимается своим делом. Не обращайся к игроку напрямую.`;
+
+    try {
+        let description = "";
+        if (settings.alt_api_enabled && settings.alt_api_key) {
+            // Логика для внешнего API
+            const response = await fetch(settings.alt_api_url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${settings.alt_api_key}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: settings.alt_api_model,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+            const data = await response.json();
+            description = data.choices[0].message.content;
+        } else {
+            // Логика через встроенный генератор SillyTavern
+            description = await generateQuietPrompt(prompt, false);
+        }
+
+        if (description) {
+            await injectToChat(description.trim());
+        }
+    } catch (err) {
+        console.error('[Living World] Ошибка генерации:', err);
+    }
+}
+
+/**
+ * Инициализация
+ */
+(async function init() {
+    console.log('[Living World] Запуск инициализации...');
+
+    try {
+        // Попытка загрузить UI (файл settings.html должен быть в той же папке)
+        await renderExtensionTemplateAsync(EXT_NAME, 'settings.html');
+    } catch (e) {
+        console.warn('[Living World] Настройки (settings.html) не найдены, работаем без UI');
+    }
+
+    // Слушатель сообщений
     setInterval(async () => {
         const ctx = getContext();
         const settings = getSettings();
+
         if (ctx.chat && ctx.chat.length !== settings._last_chat_len) {
             settings._last_chat_len = ctx.chat.length;
+            
+            // Проверка шанса появления
             if (Math.random() * 100 < settings.encounter_chance) {
-                await generateNPCEncounter();
+                console.log('[Living World] Событие сработало!');
+                await triggerEncounter();
             }
+            saveSettingsDebounced();
         }
-    }, 3000);
+    }, 2000);
+
+    console.log('[Living World] Расширение успешно загружено');
 })();
