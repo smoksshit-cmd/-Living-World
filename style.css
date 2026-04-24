@@ -1,0 +1,216 @@
+/* Living World — стиль настроек и карточек NPC */
+.living-world-settings {
+    --lw-border: var(--SmartThemeBorderColor, #3a3a3a);
+    --lw-accent: var(--SmartThemeQuoteColor, #9ad);
+    --lw-fg: var(--SmartThemeBodyColor, #ddd);
+    --lw-bg: var(--black50a, rgba(0,0,0,0.35));
+    --lw-bg2: var(--black80a, rgba(0,0,0,0.6));
+    --lw-radius: 6px;
+    --lw-gap: 10px;
+    --lw-gap-sm: 6px;
+    --lw-muted: rgba(255,255,255,0.65);
+}
+
+/* Общий тон */
+.living-world-settings .inline-drawer {
+    border: 1px solid var(--lw-border);
+    border-radius: var(--lw-radius);
+    background: var(--lw-bg);
+}
+.living-world-settings .inline-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    color: var(--lw-fg);
+}
+.living-world-settings .inline-drawer-content {
+    padding: 10px;
+}
+
+/* Заголовки и разделители */
+.living-world-settings h4 {
+    margin: 6px 0 8px 0;
+    color: var(--lw-accent);
+    font-weight: 600;
+}
+.living-world-settings hr {
+    border: none;
+    border-top: 1px solid var(--lw-border);
+    margin: 12px 0;
+    opacity: 0.65;
+}
+
+/* Контейнеры полей */
+.living-world-settings .flex-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lw-gap-sm);
+    margin-bottom: var(--lw-gap);
+}
+
+.living-world-settings .lw-row {
+    display: flex;
+    gap: var(--lw-gap);
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: var(--lw-gap-sm);
+}
+
+.living-world-settings .lw-grid,
+.living-world-settings .lw-grid-2,
+.living-world-settings .lw-grid-3 {
+    display: grid;
+    gap: var(--lw-gap);
+    margin-bottom: var(--lw-gap);
+}
+.living-world-settings .lw-grid,
+.living-world-settings .lw-grid-2 { grid-template-columns: 1fr 1fr; }
+.living-world-settings .lw-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+@media (max-width: 900px) {
+    .living-world-settings .lw-grid,
+    .living-world-settings .lw-grid-2,
+    .living-world-settings .lw-grid-3 {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Подписи и поля */
+.living-world-settings label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--lw-fg);
+}
+
+.living-world-settings .text_pole,
+.living-world-settings input[type="text"],
+.living-world-settings input[type="number"],
+.living-world-settings input[type="password"],
+.living-world-settings select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: var(--lw-bg2);
+    color: var(--lw-fg);
+    border: 1px solid var(--lw-border);
+    border-radius: var(--lw-radius);
+    outline: none;
+}
+.living-world-settings input[type="number"] {
+    -moz-appearance: textfield;
+}
+.living-world-settings input[type="number"]::-webkit-outer-spin-button,
+.living-world-settings input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Чекбоксы и радиокнопки — чуть крупнее */
+.living-world-settings input[type="checkbox"],
+.living-world-settings input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--lw-accent);
+}
+
+/* Подсказки и мелкий текст */
+.living-world-settings .lw-hint {
+    font-size: 12px;
+    color: var(--lw-muted);
+    line-height: 1.3;
+}
+
+/* Кнопки */
+.living-world-settings .menu_button {
+    margin-top: 6px;
+    border-radius: var(--lw-radius);
+}
+.living-world-settings #lw-manual-encounter-btn {
+    border: 1px solid var(--lw-accent);
+}
+
+/* Реестр NPC */
+.lw-registry-container {
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--lw-bg2);
+    border: 1px solid var(--lw-border);
+    border-radius: var(--lw-radius);
+    padding: 10px;
+    margin-bottom: 10px;
+}
+.lw-npc-card {
+    background: var(--lw-bg);
+    border-left: 3px solid var(--lw-accent);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    border-radius: 0 var(--lw-radius) var(--lw-radius) 0;
+    font-size: 0.95em;
+}
+.lw-npc-card strong {
+    color: var(--lw-fg);
+}
+.lw-npc-type {
+    font-size: 0.85em;
+    opacity: 0.75;
+    margin-left: 6px;
+}
+.lw-npc-card p {
+    margin: 5px 0 0 0;
+    font-style: italic;
+    opacity: 0.9;
+}
+
+/* Состояние disabled для секций (если захочешь добавлять класс через JS) */
+.living-world-settings .lw-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+    filter: grayscale(0.2);
+}
+
+/* Блок альтернативного API */
+.living-world-settings .lw-altapi-block {
+    border: 1px dashed var(--lw-border);
+    border-radius: var(--lw-radius);
+    padding: 10px;
+    background: linear-gradient(0deg, rgba(255,255,255,0.02), rgba(255,255,255,0.03));
+}
+.living-world-settings .lw-altapi-block .lw-row > label {
+    flex: 1;
+}
+
+/* Маскировка поля ключа Alt API (по ID из настроек) */
+#lw-altapi-key {
+    -webkit-text-security: disc; /* Chrome/Safari */
+    text-security: disc;         /* CSS пропосал, в части браузеров просто игнорится */
+    letter-spacing: 0.5px;
+}
+
+/* Мелкие украшения */
+.living-world-settings .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--lw-border);
+    color: var(--lw-fg);
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+/* Мягкие фокусы */
+.living-world-settings .text_pole:focus,
+.living-world-settings input[type="text"]:focus,
+.living-world-settings input[type="number"]:focus,
+.living-world-settings input[type="password"]:focus,
+.living-world-settings select:focus {
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--lw-accent) 35%, transparent);
+    border-color: color-mix(in oklab, var(--lw-accent) 55%, var(--lw-border));
+    transition: box-shadow 140ms ease, border-color 140ms ease;
+}
+
+/* Скрытые блоки (если их включать/выключать через классы) */
+.living-world-settings .is-hidden {
+    display: none !important;
+}
