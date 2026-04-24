@@ -1,12 +1,10 @@
 {
-  "display_name": "Living World",
-  "version": "1.0.0",
-  "description": "Автономные НПС, случайные встречи и живой мир для ролевых игр. Персонажи живут своей жизнью, НПС появляются случайно, ведётся хроника событий за кадром.",
-  "js": "index.js",
-  "author": "LivingWorld",
-  "homePage": "https://github.com/your-repo/living-world-extension",
-  "tags": ["roleplay", "npc", "world", "narrative"],
-  "st_dependencies": {
-    "features": ["chat_completion"]
-  }
+    "display_name": "Living World",
+    "version": "1.0.0",
+    "description": "Adds random NPC encounters, offscreen character life, and knowledge separation to your RP. Characters live independently, NPCs appear spontaneously, and the main character doesn't omnisciently track your actions.",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "living-world",
+    "homePage": "https://github.com/your-username/living-world-extension",
+    "tags": ["roleplay", "world-building", "npcs", "immersion"]
 }
