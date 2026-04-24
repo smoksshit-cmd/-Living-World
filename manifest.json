@@ -2,12 +2,9 @@
     "display_name": "Living World",
     "version": "1.0.0",
     "author": "LivingWorld",
-    "homePage": "https://github.com/livingworld/st-living-world",
+    "homePage": "https://github.com/your-user/living-world-extension",
     "auto_update": true,
     "js": "index.js",
     "css": "style.css",
-    "description": "Живой мир: автономные НПС, случайные энкаунтеры, отдельный AI-эндпоинт",
-    "requires": [],
-    "optional": [],
-    "conflict": []
+    "description": "Живой мир: автономные НПС, случайные энкаунтеры, отдельный AI-эндпоинт"
 }
