@@ -1,0 +1,105 @@
+<div class="living-world-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>🌍 Living World</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+
+        <div class="inline-drawer-content">
+            <div class="flex-container">
+                <label><input type="checkbox" id="lw-enabled"> Включить расширение</label>
+            </div>
+
+            <hr>
+            <h4>Случайные NPC (Encounters)</h4>
+            <div class="flex-container">
+                <label><input type="checkbox" id="lw-encounter-enabled"> Включить случайные появления</label>
+                <label><input type="checkbox" id="lw-trigger-messages"> Проверять каждые N сообщений</label>
+                <label><input type="checkbox" id="lw-trigger-movement"> Триггер на слова движения (иду, выхожу, захожу...)</label>
+            </div>
+            <div class="lw-grid-2">
+                <label>
+                    Интервал сообщений:
+                    <input type="number" id="lw-encounter-interval" min="1" max="50" class="text_pole">
+                </label>
+                <label>
+                    Шанс появления (%):
+                    <input type="number" id="lw-encounter-chance" min="1" max="100" class="text_pole">
+                </label>
+            </div>
+
+            <hr>
+            <h4>Имена и пол</h4>
+            <div class="lw-row">
+                <label><input type="checkbox" id="lw-name-mode-context" checked> Определять культуру имён по контексту (кириллица → RU, латиница → EN)</label>
+            </div>
+            <div class="lw-row lw-hint">Если выключено — используются выбранные ниже банки имён.</div>
+            <div class="lw-row">
+                <label><input type="checkbox" id="lw-name-russian"> Русские имена</label>
+                <label><input type="checkbox" id="lw-name-english"> Английские имена</label>
+                <label><input type="checkbox" id="lw-name-japanese"> Японские</label>
+                <label><input type="checkbox" id="lw-name-fantasy"> Фэнтези</label>
+            </div>
+            <div class="lw-grid-2">
+                <label>
+                    Пол по умолчанию:
+                    <select id="lw-gender-default" class="text_pole">
+                        <option value="random">50/50 (Случайно)</option>
+                        <option value="male">Только мужской</option>
+                        <option value="female">Только женский</option>
+                        <option value="more_male">Чаще мужской (70/30)</option>
+                        <option value="more_female">Чаще женский (70/30)</option>
+                    </select>
+                </label>
+            </div>
+
+            <hr>
+            <h4>Альтернативный API (OpenAI-совместимый)</h4>
+            <div class="lw-altapi-block">
+                <div class="lw-row">
+                    <label><input type="checkbox" id="lw-altapi-enabled"> Использовать альтернативный API для генерации NPC</label>
+                </div>
+                <div class="lw-grid-2">
+                    <label>
+                        Endpoint (chat/completions или базовый /v1):
+                        <input type="text" id="lw-altapi-url" class="text_pole" placeholder="https://api.openrouter.ai/v1/chat/completions">
+                    </label>
+                    <label>
+                        API Key:
+                        <input type="password" id="lw-altapi-key" class="text_pole" placeholder="sk-...">
+                    </label>
+                </div>
+                <div class="lw-row">
+                    <button id="lw-altapi-connect" class="menu_button">🔌 Подключиться / Список моделей</button>
+                    <span id="lw-altapi-status" class="badge">не подключено</span>
+                </div>
+                <div class="lw-grid-2">
+                    <label>
+                        Модель:
+                        <select id="lw-altapi-model" class="text_pole">
+                            <option value="">— не выбрано —</option>
+                        </select>
+                    </label>
+                    <label>
+                        Температура:
+                        <input type="number" id="lw-altapi-temperature" step="0.1" min="0" max="2" class="text_pole" placeholder="0.9">
+                    </label>
+                </div>
+                <div class="lw-row">
+                    <label><input type="checkbox" id="lw-altapi-use-for-names"> Генерировать имена через альтернативный API</label>
+                </div>
+                <div class="lw-hint">
+                    Поддерживаются OpenAI-совместимые провайдеры. Список моделей берётся с /v1/models (или производных). Если CORS блокирует — используй прокси.
+                </div>
+            </div>
+
+            <hr>
+            <h4>Управление</h4>
+            <button id="lw-manual-encounter-btn" class="menu_button">🎲 Вызвать случайного NPC сейчас</button>
+
+            <h4>История NPC</h4>
+            <div id="lw-npc-list" class="lw-registry-container"></div>
+            <button id="lw-clear-registry" class="menu_button">Очистить историю NPC</button>
+        </div>
+    </div>
+</div>
