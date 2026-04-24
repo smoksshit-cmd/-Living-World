@@ -804,7 +804,24 @@
             saveSettings();
         });
 
-        $('#lw_lorebook_txt').val(s.targetLorebook).on('input', function() {
+        // Восстанавливаем targetLorebook: если значение есть в дропдауне — ставим там,
+        // иначе показываем в текстовом поле (введено вручную)
+        (function restoreTargetLorebook() {
+            var saved = s.targetLorebook || '';
+            if (!saved) return;
+            // Пробуем выбрать в дропдауне
+            var sel = $('#lw_lorebook_sel');
+            var found = sel.find('option[value="' + saved.replace(/"/g, '\"') + '"]').length > 0;
+            if (found) {
+                sel.val(saved);
+                $('#lw_lorebook_txt').val('');
+            } else {
+                // Значение введено вручную — показываем в текстовом поле
+                $('#lw_lorebook_txt').val(saved);
+            }
+        })();
+
+        $('#lw_lorebook_txt').on('input', function() {
             getSettings().targetLorebook = this.value;
             $('#lw_lorebook_sel').val('');
             saveSettings();
@@ -816,15 +833,34 @@
         $('#lw_know_sep').prop('checked', s.knowledgeSeparation).on('change', function() { getSettings().knowledgeSeparation = this.checked; saveSettings(); });
         $('#lw_timeline').prop('checked', s.timelineEnabled).on('change', function() { getSettings().timelineEnabled = this.checked; saveSettings(); });
 
-        // Эндпоинт
+        // Эндпоинт — восстанавливаем все поля из сохранённых настроек
         $('#lw_ep_on').prop('checked', s.useCustomEndpoint).on('change', function() {
             getSettings().useCustomEndpoint = this.checked;
             $('#lw_ep_panel').toggle(this.checked);
             saveSettings();
         });
         $('#lw_ep_panel').toggle(s.useCustomEndpoint);
-        $('#lw_ep_url').val(s.customEndpointUrl).on('input', function() { getSettings().customEndpointUrl = this.value; saveSettings(); });
-        $('#lw_ep_key').val(s.customApiKey).on('input', function() { getSettings().customApiKey = this.value; saveSettings(); });
+
+        // Восстанавливаем URL и ключ
+        $('#lw_ep_url').val(s.customEndpointUrl || '').on('input', function() {
+            getSettings().customEndpointUrl = this.value;
+            saveSettings();
+        });
+        $('#lw_ep_key').val(s.customApiKey || '').on('input', function() {
+            getSettings().customApiKey = this.value;
+            saveSettings();
+        });
+
+        // Восстанавливаем модель — добавляем сохранённое значение в селект сразу,
+        // даже без загрузки списка, чтобы оно не терялось
+        (function() {
+            var sel = $('#lw_model_sel');
+            if (s.customModel) {
+                sel.empty().append('<option value="' + s.customModel + '">' + s.customModel + '</option>');
+                sel.val(s.customModel);
+            }
+            sel.on('change', function() { getSettings().customModel = this.value; saveSettings(); });
+        })();
 
         // Загрузка моделей
         $('#lw_load_models').on('click', async function() {
@@ -838,6 +874,7 @@
                 const models = data.data ? data.data.map(function(m) { return m.id; }) : (Array.isArray(data) ? data : []);
                 const sel = $('#lw_model_sel').empty();
                 models.forEach(function(m) { sel.append('<option value="' + m + '">' + m + '</option>'); });
+                // Восстанавливаем ранее выбранную модель в обновлённом списке
                 if (cfg.customModel) sel.val(cfg.customModel);
                 sel.on('change', function() { getSettings().customModel = this.value; saveSettings(); });
                 btn.text('✓ (' + models.length + ')');
