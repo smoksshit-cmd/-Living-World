@@ -113,7 +113,13 @@
 .lw-toggle-sm .lw-sw::before { width: 11px; height: 11px; }
 .lw-toggle-sm input:checked + .lw-sw::before { transform: translateX(13px); }
 
-#lw_ep_panel {
+.lw-arrow {
+    font-size: 10px; opacity: 0.6; margin-left: auto; margin-right: 6px;
+    transition: opacity 0.15s;
+}
+.lw-header:hover .lw-arrow { opacity: 1; }
+
+
     margin-top: 6px; padding-top: 6px;
     border-top: 1px solid rgba(255,255,255,0.08);
 }
