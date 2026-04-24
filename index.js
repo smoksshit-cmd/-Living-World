@@ -392,15 +392,18 @@
         return `
 <div id="lw_settings_panel" class="lw-panel">
 
-    <div class="lw-header">
+    <div class="lw-header" id="lw_header_toggle" style="cursor:pointer;">
         <span>🌍</span>
         <b>Living World</b>
         <small>живой мир · нпс · энкаунтеры</small>
-        <label class="lw-toggle">
+        <span id="lw_collapse_arrow" class="lw-arrow">▲</span>
+        <label class="lw-toggle" onclick="event.stopPropagation()">
             <input type="checkbox" id="lw_enabled" />
             <span class="lw-sw"></span>
         </label>
     </div>
+
+    <div id="lw_body">
 
     <!-- Имена -->
     <div class="lw-section">
@@ -499,11 +502,20 @@
         </div>
     </div>
 
+    </div><!-- /lw_body -->
 </div>`;
     }
 
     function bindUI() {
         const s = getSettings();
+
+        // Сворачивание по клику на шапку
+        var collapsed = false;
+        $('#lw_header_toggle').on('click', function() {
+            collapsed = !collapsed;
+            $('#lw_body').toggle(!collapsed);
+            $('#lw_collapse_arrow').text(collapsed ? '▼' : '▲');
+        });
 
         $('#lw_enabled').prop('checked', s.enabled).on('change', function() { getSettings().enabled = this.checked; saveSettings(); });
 
