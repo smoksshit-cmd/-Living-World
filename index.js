@@ -221,96 +221,80 @@
     }
 
     // ============================================================
-    //  Лорбук — только через внутренние объекты ST, без fetch к /api/
+    //  Лорбук — читаем world_names так же как рабочие расширения ST
     // ============================================================
 
     /**
-     * Получаем список лорбуков из внутренних объектов ST.
-     * НЕ делаем fetch к /api/worldinfo/get — он требует CSRF и возвращает 403.
+     * world_names — глобальный массив ST, заполняется при старте.
+     * Рабочий паттерн взят из lore-manager: Array.isArray(world_names).
+     * В нашем IIFE без ES-импортов обращаемся через window.world_names —
+     * это тот же самый объект, просто через глобальный контекст.
      */
     function getAvailableLorebooks() {
-        var result = [];
         try {
-            // Способ 1: window.world_names — массив строк, самый надёжный
-            if (Array.isArray(window.world_names) && window.world_names.length) {
-                return window.world_names.slice();
-            }
-            // Способ 2: window.worldInfoData — объект { lorebookName: {...} }
-            if (window.worldInfoData && typeof window.worldInfoData === 'object') {
-                result = Object.keys(window.worldInfoData);
-                if (result.length) return result;
-            }
-            // Способ 3: через context ST
-            const context = window.SillyTavern ? window.SillyTavern.getContext() : null;
-            if (context) {
-                if (Array.isArray(context.world_names) && context.world_names.length) {
-                    return context.world_names.slice();
-                }
-                if (context.worldInfo && typeof context.worldInfo === 'object') {
-                    result = Object.keys(context.worldInfo);
-                    if (result.length) return result;
-                }
+            // Основной способ — именно так делает lore-manager и другие расширения ST
+            if (Array.isArray(window.world_names)) {
+                return [...window.world_names];
             }
         } catch(e) {
             console.warn('[LivingWorld] getAvailableLorebooks:', e.message);
         }
-        return result;
+        return [];
     }
 
     /**
-     * Сохраняем НПС в лорбук через внутренние функции ST.
-     * Не используем fetch — только JS API.
+     * Сохраняем НПС в лорбук.
+     * ST экспортирует loadWorldInfo / saveWorldInfo глобально —
+     * те же функции что использует встроенный редактор лорбуков.
      */
     async function saveNpcToLorebook(npc, lorebookName) {
         if (!lorebookName) return;
 
-        // Текст записи
         const entryContent = npc.description
             + '\n[Тип: ' + npc.type + ' | Локация: ' + npc.location + ' | Living World]';
 
         try {
-            // Вариант A: window.createWorldInfoEntry(bookName, data) — функция ST
-            if (typeof window.createWorldInfoEntry === 'function') {
-                await window.createWorldInfoEntry(lorebookName, {
-                    key:       [npc.name],
-                    content:   entryContent,
-                    comment:   'Living World · ' + npc.type,
-                    enabled:   true,
-                    selective: false,
-                });
-                console.log('[LivingWorld] НПС сохранён в лорбук через createWorldInfoEntry:', lorebookName);
+            // Загружаем лорбук через ST API (не fetch)
+            var book = null;
+            if (typeof window.loadWorldInfo === 'function') {
+                book = await window.loadWorldInfo(lorebookName);
+            } else if (window.worldInfoData && window.worldInfoData[lorebookName]) {
+                book = window.worldInfoData[lorebookName];
+            }
+
+            if (!book) {
+                console.warn('[LivingWorld] Лорбук не найден:', lorebookName);
                 return;
             }
 
-            // Вариант B: window.saveWorldInfo(bookName, data) — старая версия ST
-            if (typeof window.saveWorldInfo === 'function' && window.worldInfoData) {
-                var book = window.worldInfoData[lorebookName];
-                if (!book) {
-                    console.warn('[LivingWorld] Лорбук не найден в worldInfoData:', lorebookName);
-                    return;
-                }
-                // Генерируем uid для новой записи
-                var uid = Date.now();
-                while (book.entries && book.entries[uid]) uid++;
+            // ST хранит записи в book.entries как объект { uid: entry }
+            if (!book.entries) book.entries = {};
 
-                if (!book.entries) book.entries = {};
-                book.entries[uid] = {
-                    uid:       uid,
-                    key:       [npc.name],
-                    keysecondary: [],
-                    content:   entryContent,
-                    comment:   'Living World · ' + npc.type,
-                    enabled:   true,
-                    selective: false,
-                    order:     uid,
-                    position:  0,
-                };
-                await window.saveWorldInfo(lorebookName, book);
-                console.log('[LivingWorld] НПС сохранён через saveWorldInfo:', lorebookName);
-                return;
+            // Уникальный uid — берём максимальный существующий + 1
+            var existingUids = Object.keys(book.entries).map(Number).filter(function(n) { return !isNaN(n); });
+            var uid = existingUids.length > 0 ? Math.max.apply(null, existingUids) + 1 : 0;
+
+            book.entries[uid] = {
+                uid:          uid,
+                key:          [npc.name],
+                keysecondary: [],
+                comment:      'Living World · ' + npc.type,
+                content:      entryContent,
+                enabled:      true,
+                selective:    false,
+                constant:     false,
+                order:        100,
+                position:     0,
+                extensions:   {},
+            };
+
+            // Сохраняем
+            if (typeof window.saveWorldInfo === 'function') {
+                await window.saveWorldInfo(lorebookName, book, true);
+                console.log('[LivingWorld] ✓ НПС записан в лорбук:', lorebookName, '| uid:', uid);
+            } else {
+                console.warn('[LivingWorld] window.saveWorldInfo недоступен — НПС не сохранён в лорбук');
             }
-
-            console.warn('[LivingWorld] Нет доступного ST API для сохранения в лорбук. Запись только в localStorage.');
         } catch(e) {
             console.warn('[LivingWorld] saveNpcToLorebook error:', e.message);
         }
