@@ -1,0 +1,165 @@
+<div id="living_world_settings" class="lw-panel">
+
+    <div class="lw-header">
+        <span class="lw-icon">🌍</span>
+        <b>Living World</b>
+        <small>Живой мир · НПС · Энкаунтеры</small>
+        <label class="lw-toggle-main">
+            <input type="checkbox" id="lw_enabled" />
+            <span class="lw-switch"></span>
+        </label>
+    </div>
+
+    <!-- ======== ИМЕНА ======== -->
+    <div class="lw-section">
+        <div class="lw-section-title">👤 Стиль имён НПС</div>
+
+        <div class="lw-row">
+            <span class="lw-label">Имена:</span>
+            <div class="lw-radio-group">
+                <label><input type="radio" name="lw_name_style" value="auto" /> 🔍 Авто (по контексту)</label>
+                <label><input type="radio" name="lw_name_style" value="russian" /> 🇷🇺 Русские</label>
+                <label><input type="radio" name="lw_name_style" value="foreign" /> 🌐 Иностранные</label>
+                <label><input type="radio" name="lw_name_style" value="mixed" /> 🎲 Смешанные</label>
+            </div>
+        </div>
+
+        <div class="lw-row">
+            <span class="lw-label">Пол:</span>
+            <div class="lw-radio-group">
+                <label><input type="radio" name="lw_name_gender" value="mixed" /> ⚥ Любой</label>
+                <label><input type="radio" name="lw_name_gender" value="male" /> ♂ Мужские</label>
+                <label><input type="radio" name="lw_name_gender" value="female" /> ♀ Женские</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======== ЭНКАУНТЕРЫ ======== -->
+    <div class="lw-section">
+        <div class="lw-section-title">
+            🎲 Случайные энкаунтеры
+            <label class="lw-toggle-small">
+                <input type="checkbox" id="lw_encounter_enabled" />
+                <span class="lw-switch-small"></span>
+            </label>
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label" for="lw_encounter_every">Каждые N сообщений:</label>
+            <input type="number" id="lw_encounter_every" class="lw-input-num" min="1" max="50" />
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label">Шанс появления: <b id="lw_chance_label">25%</b></label>
+            <input type="range" id="lw_encounter_chance" class="lw-slider" min="1" max="100" />
+        </div>
+
+        <div class="lw-subsection">
+            <div class="lw-sub-title">Веса типов НПС (сумма ~100):</div>
+            <div class="lw-weights">
+                <div class="lw-weight-row">
+                    <span>👤 Проходной</span>
+                    <input type="number" id="lw_w_passerby" class="lw-input-num" min="0" max="100" />
+                </div>
+                <div class="lw-weight-row">
+                    <span>🔍 С зацепкой</span>
+                    <input type="number" id="lw_w_hook" class="lw-input-num" min="0" max="100" />
+                </div>
+                <div class="lw-weight-row">
+                    <span>⭐ Важный</span>
+                    <input type="number" id="lw_w_important" class="lw-input-num" min="0" max="100" />
+                </div>
+            </div>
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label lw-check-label">
+                <input type="checkbox" id="lw_auto_location" />
+                🗺️ Авто-определение локации из текста
+            </label>
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label" for="lw_manual_location">Локация вручную:</label>
+            <input type="text" id="lw_manual_location" class="lw-input-text" placeholder="таверна, лес, замок..." />
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label lw-check-label">
+                <input type="checkbox" id="lw_save_lorebook" />
+                📖 Сохранять НПС в Lorebook
+            </label>
+        </div>
+
+        <button id="lw_trigger_now" class="lw-btn lw-btn-accent">⚡ Вызвать НПС сейчас</button>
+    </div>
+
+    <!-- ======== АВТОНОМИЯ ======== -->
+    <div class="lw-section">
+        <div class="lw-section-title">
+            🧠 Автономия персонажа
+            <label class="lw-toggle-small">
+                <input type="checkbox" id="lw_autonomy_enabled" />
+                <span class="lw-switch-small"></span>
+            </label>
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label" for="lw_autonomy_every">Каждые N сообщений:</label>
+            <input type="number" id="lw_autonomy_every" class="lw-input-num" min="1" max="50" />
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label lw-check-label">
+                <input type="checkbox" id="lw_knowledge_sep" />
+                🔒 Разделение знаний (персонаж не знает сцен без него)
+            </label>
+        </div>
+
+        <div class="lw-row">
+            <label class="lw-label lw-check-label">
+                <input type="checkbox" id="lw_timeline_enabled" />
+                📜 Хроника мира (инжект событий в промпт)
+            </label>
+        </div>
+    </div>
+
+    <!-- ======== ЭНДПОИНТ ======== -->
+    <div class="lw-section">
+        <div class="lw-section-title">
+            🔌 Отдельный AI эндпоинт
+            <label class="lw-toggle-small">
+                <input type="checkbox" id="lw_custom_endpoint_enabled" />
+                <span class="lw-switch-small"></span>
+            </label>
+        </div>
+        <div class="lw-hint">НПС будут генерироваться отдельно, не тратя токены основного чата</div>
+
+        <div id="lw_endpoint_panel">
+            <div class="lw-row">
+                <label class="lw-label" for="lw_endpoint_url">URL эндпоинта:</label>
+                <input type="text" id="lw_endpoint_url" class="lw-input-text"
+                    placeholder="https://api.openai.com/v1" />
+            </div>
+
+            <div class="lw-row">
+                <label class="lw-label" for="lw_endpoint_key">API ключ:</label>
+                <input type="password" id="lw_endpoint_key" class="lw-input-text"
+                    placeholder="sk-..." />
+            </div>
+
+            <div class="lw-row lw-model-row">
+                <label class="lw-label">Модель:</label>
+                <select id="lw_model_select" class="lw-select">
+                    <option value="">— загрузить модели —</option>
+                </select>
+                <button id="lw_load_models" class="lw-btn">🔄 Загрузить</button>
+            </div>
+
+            <div class="lw-row">
+                <button id="lw_test_connection" class="lw-btn lw-btn-outline">🔗 Тест соединения</button>
+            </div>
+        </div>
+    </div>
+
+</div>
