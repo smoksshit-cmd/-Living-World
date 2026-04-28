@@ -525,14 +525,14 @@
         <span>🌍</span>
         <b>Living World</b>
         <small>живой мир · нпс · энкаунтеры</small>
-        <span id="lw_collapse_arrow" class="lw-arrow">▲</span>
+        <span id="lw_collapse_arrow" class="lw-arrow">▼</span>
         <label class="lw-toggle" onclick="event.stopPropagation()">
             <input type="checkbox" id="lw_enabled"/>
             <span class="lw-sw"></span>
         </label>
     </div>
 
-    <div id="lw_body">
+    <div id="lw_body" style="display:none">
 
     <div class="lw-section">
         <div class="lw-stitle">👤 Стиль имён НПС</div>
@@ -654,7 +654,7 @@
 
     async function bindUI() {
         var s = getSettings();
-        var collapsed = false;
+        var collapsed = true;
 
         $('#lw_header_toggle').on('click', function() {
             collapsed = !collapsed;
