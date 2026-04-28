@@ -37,12 +37,21 @@
         customModel: '',
     };
 
+    // Получить объект extension_settings — через контекст ST или window
+    function getExtensionSettings() {
+        var ctx = getSTContext();
+        if (ctx && ctx.extensionSettings) return ctx.extensionSettings;
+        if (window.extension_settings) return window.extension_settings;
+        window.extension_settings = {};
+        return window.extension_settings;
+    }
+
     function getSettings() {
-        if (!window.extension_settings) window.extension_settings = {};
-        if (!window.extension_settings[EXT_NAME]) {
-            window.extension_settings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
+        var extSettings = getExtensionSettings();
+        if (!extSettings[EXT_NAME]) {
+            extSettings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
         }
-        var s = window.extension_settings[EXT_NAME];
+        var s = extSettings[EXT_NAME];
         Object.keys(DEFAULT_SETTINGS).forEach(function(k) {
             if (s[k] === undefined) s[k] = DEFAULT_SETTINGS[k];
         });
@@ -50,7 +59,16 @@
     }
 
     function saveSettings() {
-        if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+        // Через контекст ST — основной способ
+        var ctx = getSTContext();
+        if (ctx && typeof ctx.saveSettingsDebounced === 'function') {
+            ctx.saveSettingsDebounced();
+            return;
+        }
+        // Фолбэк через window
+        if (typeof window.saveSettingsDebounced === 'function') {
+            window.saveSettingsDebounced();
+        }
     }
 
     // ============================================================
@@ -223,17 +241,33 @@
     //  Лорбук ST — через REST API (без ES-импортов)
     // ============================================================
 
+    // Получить заголовки запроса ST (с CSRF-токеном и пр.)
+    function getSTRequestHeaders() {
+        var ctx = getSTContext();
+        if (ctx && typeof ctx.getRequestHeaders === 'function') {
+            return ctx.getRequestHeaders();
+        }
+        return { 'Content-Type': 'application/json' };
+    }
+
     // Получить список лорбуков через API ST
     async function getAvailableLorebooks() {
         try {
-            var r = await fetch('/api/worlds/all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'  });
+            var headers = getSTRequestHeaders();
+            var r = await fetch('/api/worldinfo/list', { method: 'POST', headers: headers, body: '{}' });
             if (r.ok) {
                 var data = await r.json();
-                if (Array.isArray(data)) return data;
-                if (Array.isArray(data.worlds)) return data.worlds;
+                // API возвращает массив объектов {file_id, name, extensions}
+                if (Array.isArray(data)) {
+                    return data.map(function(item) {
+                        return (typeof item === 'string') ? item : (item.name || item.file_id || '');
+                    }).filter(function(n) { return n; });
+                }
             }
-        } catch(e) {}
-        // Фолбэк: window.world_names иногда доступен если другое расширение его экспортировало
+        } catch(e) {
+            console.warn('[LivingWorld] getAvailableLorebooks error:', e);
+        }
+        // Фолбэк: window.world_names иногда доступен
         if (Array.isArray(window.world_names) && window.world_names.length) return window.world_names.slice();
         return [];
     }
@@ -241,9 +275,10 @@
     // Загрузить данные конкретного лорбука
     async function loadLorebookData(name) {
         try {
-            var r = await fetch('/api/worlds/get', {
+            var headers = getSTRequestHeaders();
+            var r = await fetch('/api/worldinfo/get', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({ name: name }),
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -257,9 +292,10 @@
     // Сохранить лорбук через API
     async function saveLorebookData(name, data) {
         try {
-            var r = await fetch('/api/worlds/edit', {
+            var headers = getSTRequestHeaders();
+            var r = await fetch('/api/worldinfo/edit', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 body: JSON.stringify({ name: name, data: data }),
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -730,8 +766,9 @@
             await bindUI();
         }
 
-        var es = window.eventSource;
-        var et = window.event_types;
+        var ctx = getSTContext();
+        var es = (ctx && ctx.eventSource) || window.eventSource;
+        var et = (ctx && (ctx.eventTypes || ctx.event_types)) || window.event_types;
         if (es && et) {
             // MESSAGE_RECEIVED — основной хук
             es.on(et.MESSAGE_RECEIVED || 'message_received', onMessageReceived);
