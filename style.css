@@ -119,7 +119,7 @@
 }
 .lw-header:hover .lw-arrow { opacity: 1; }
 
-
+.lw-section + .lw-section {
     margin-top: 6px; padding-top: 6px;
     border-top: 1px solid rgba(255,255,255,0.08);
 }
